@@ -85,7 +85,6 @@ class cnn_simCLR(nn.Module):
             nn.LazyLinear(dense_units),
             nn.ReLU(),
             nn.LazyLinear(dense_units),
-            nn.ReLU(),
         )
 
     def forward(self, x):
@@ -111,7 +110,7 @@ class CIFAR10_Paired(CIFAR10):
 
 
 def simCLR_transform(
-    scaleRange: Tuple[float, float] = (0.2, 1.0),
+    scaleRange: Tuple[float, float] = (0.1, 1.0),
     ratioRange: Tuple[float, float] = (0.75, 1.33),
     colorJitter: Tuple[float, float, float, float] = (0.8, 0.8, 0.8, 0.2),
     guassianKernelSize: int = 3,
@@ -123,7 +122,8 @@ def simCLR_transform(
         [
             transforms.RandomResizedCrop(32, scale=scaleRange, ratio=ratioRange),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomApply([transforms.ColorJitter(*colorJitter)]),
+            transforms.RandomApply([transforms.ColorJitter(*colorJitter)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
             transforms.RandomApply(
                 [transforms.GaussianBlur(kernel_size=guassianKernelSize)]
             ),
@@ -340,6 +340,7 @@ def supervised(
 )
 @click.option("--guassian_kernel_size", default=3, help="Gaussian kernel size")
 @click.option("--epochs", default=20, help="Number of epochs")
+@click.option("--temperature", default=0.5, help="Temperature for NT-Xent loss")
 @click.option("--learning_rate", default=0.01, help="Learning rate")
 @click.option("--momentum", default=0.9, help="Momentum")
 @click.option("--weight_decay", default=1e-5, help="Weight decay")
@@ -350,6 +351,7 @@ def unsupervised(
     color_jitter: Tuple[float, float, float, float] = (0.8, 0.8, 0.8, 0.2),
     guassian_kernel_size: int = 3,
     epochs: int = 20,
+    temperature: float = 0.5,
     learning_rate: float = 0.01,
     momentum: float = 0.9,
     weight_decay: float = 1e-5,
@@ -374,13 +376,21 @@ def unsupervised(
 
     trainLoader = DataLoader(cifarTrain, batch_size=batch_size, shuffle=True)
 
-    lossFun = nt_xent
-    sgd = optim.SGD(
+    lossFun = lambda x: nt_xent(x, t=temperature)
+    # optimizer = optim.SGD(
+    #     model.parameters(),
+    #     lr=learning_rate,
+    #     momentum=momentum,
+    #     weight_decay=weight_decay,
+    # )
+    optimizer = optim.Adam(
         model.parameters(),
         lr=learning_rate,
-        momentum=momentum,
         weight_decay=weight_decay,
     )
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer, T_max=len(trainLoader), eta_min=0, last_epoch=-1
+    # )
 
     trainingLog = pd.DataFrame(columns=["Epoch", "Train_Loss"])
     for epoch in range(epochs):
@@ -399,7 +409,7 @@ def unsupervised(
                 images = images.cuda()
 
                 # Zero out gradients
-                sgd.zero_grad()
+                optimizer.zero_grad()
 
                 # Get outputs
                 output = model(images)
@@ -412,7 +422,8 @@ def unsupervised(
 
                 # Update weights
                 loss.backward()
-                sgd.step()
+                optimizer.step()
+                # scheduler.step()
 
                 bar.update(
                     1,
