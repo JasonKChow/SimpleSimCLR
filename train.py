@@ -319,7 +319,7 @@ def supervised(
 @click.option("--batch_size", default=128, help="Batch size")
 @click.option(
     "--scale_range",
-    default=(0.2, 1.0),
+    default=(0.1, 1.0),
     nargs=2,
     help="Scale range for random resized crop",
     type=(float, float),
@@ -345,7 +345,7 @@ def supervised(
 @click.option("--weight_decay", default=1e-5, help="Weight decay")
 def unsupervised(
     batch_size: int = 128,
-    scale_range: Tuple[float, float] = (0.2, 1.0),
+    scale_range: Tuple[float, float] = (0.1, 1.0),
     ratio_range: Tuple[float, float] = (0.75, 1.33),
     color_jitter: Tuple[float, float, float, float] = (0.8, 0.8, 0.8, 0.2),
     guassian_kernel_size: int = 3,
