@@ -68,7 +68,7 @@ class cnn(nn.Module):
 
 
 class cnn_simCLR(nn.Module):
-    def __init__(self, dense_units=2048, use_encoder_dense=False):
+    def __init__(self, dense_units=128, use_encoder_dense=False):
         """
         Create a small CNN model based on the All-CNN-C architecture and set it
         up for simCLR training. The dense layers are attached right before the
