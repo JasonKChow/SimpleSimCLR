@@ -8,7 +8,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2 as transforms
 from torchvision.datasets import CIFAR10
-from torchvision.transforms import ToTensor
 from torchinfo import summary
 from PIL import Image
 import pandas as pd
@@ -128,7 +127,8 @@ def simCLR_transform(
             transforms.RandomApply(
                 [transforms.GaussianBlur(kernel_size=guassianKernelSize)]
             ),
-            transforms.ToTensor(),
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True),
         ]
     )
 
@@ -200,10 +200,13 @@ def supervised(
     strategy. Architecture is modeled after All-CNN-C.
     """
     model = cnn()
-    print(summary(model, input_size=(1, 3, 32, 32)))
+    click.echo(summary(model, input_size=(1, 3, 32, 32)))
 
-    cifarTrain = CIFAR10(root="./data", train=True, download=True, transform=ToTensor())
-    cifarTest = CIFAR10(root="./data", train=False, download=True, transform=ToTensor())
+    transform = transforms.Compose(
+        [transforms.ToImage(), transforms.ToDtype(torch.float32, scale=True)]
+    )
+    cifarTrain = CIFAR10(root="./data", train=True, download=True, transform=transform)
+    cifarTest = CIFAR10(root="./data", train=False, download=True, transform=transform)
 
     trainLoader = DataLoader(cifarTrain, batch_size=batch_size, shuffle=True)
     testLoader = DataLoader(cifarTest, batch_size=batch_size, shuffle=False)
@@ -283,7 +286,7 @@ def supervised(
             testLoss /= len(testLoader)
             testAcc /= len(cifarTest)
 
-        print(
+        click.echo(
             f"Epoch {epoch + 1}: Train Loss: {np.mean(trainLosses):5.3f}, Train Accuracy: {np.mean(trainAccs):5.3f}, Test Loss: {testLoss:5.3f}, Test Accuracy: {testAcc:5.3f}"
         )
 
@@ -357,7 +360,7 @@ def unsupervised(
     before the dense layers.
     """
     model = cnn_simCLR()
-    print(summary(model, input_size=(1, 3, 32, 32)))
+    click.echo(summary(model, input_size=(1, 3, 32, 32)))
 
     augTransform = simCLR_transform(
         scaleRange=scale_range,
@@ -416,8 +419,7 @@ def unsupervised(
                     np.mean(trainLosses),
                 )
 
-        trainLoss /= len(trainLoader)
-        print(f"Epoch {epoch + 1}: Train Loss: {trainLoss}")
+        click.echo(f"Epoch {epoch + 1}: Train Loss: {np.mean(trainLosses):5.3f}")
 
         # Add data to csv
         trainingLog = pd.concat(
@@ -426,7 +428,7 @@ def unsupervised(
                 pd.DataFrame(
                     {
                         "Epoch": [epoch],
-                        "Train_Loss": [trainLoss],
+                        "Train_Loss": [np.mean(trainLosses)],
                     },
                     index=[0],
                 ),
