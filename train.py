@@ -12,6 +12,7 @@ from torchvision.transforms import ToTensor
 from torchinfo import summary
 from PIL import Image
 import pandas as pd
+import numpy as np
 
 
 class cnn(nn.Module):
@@ -132,11 +133,11 @@ def simCLR_transform(
     )
 
 
-def nt_xent_slow(x, t=0.5):
+def nt_xent(x, t=0.5):
     """
-    Return NT-Xent loss given the batch. This implementation is pretty slow but
+    Return NT-Xent loss given the batch. This implementation may be slow but
     each step is very explicit for pedagogical purposes. See other
-    implementation for a more optimized version (using cross_entropy()
+    implementations for a more optimized version (using cross_entropy()
     directly).
     """
     # Scaled (t) Cosine similarity between every pair
@@ -172,24 +173,8 @@ def nt_xent_slow(x, t=0.5):
         # Calculate the loss
         loss += -torch.log(pos / (pos + neg))
 
+    # Mean of the function across the batch
     return loss / x.shape[0]
-
-
-def nt_xent(x, t=0.5):
-    """https://github.com/p3i0t/SimCLR-CIFAR10/blob/2f449c2e39666a5c3439859347e3f1aced67b17d/simclr.py#L52C1-L65C71"""
-    x = F.normalize(x, dim=1)
-    x_scores = x @ x.t()  # normalized cosine similarity scores
-    x_scale = x_scores / t  # scale with temperature
-
-    # (2N-1)-way softmax without the score of i-th entry itself.
-    # Set the diagonals to be large negative values, which become zeros after softmax.
-    x_scale = x_scale - torch.eye(x_scale.size(0)).to(x_scale.device) * 1e5
-
-    # targets 2N elements.
-    targets = torch.arange(x.size()[0])
-    targets[::2] += 1  # target of 2k element is 2k+1
-    targets[1::2] -= 1  # target of 2k+1 element is 2k
-    return F.cross_entropy(x_scale, targets.long().to(x_scale.device))
 
 
 @click.group()
@@ -231,14 +216,25 @@ def supervised(
         weight_decay=weight_decay,
     )
 
+    # Create csv file to store the results
+    trainingLog = pd.DataFrame(
+        columns=["Epoch", "Train_Loss", "Train_Accuracy", "Test_Loss", "Test_Accuracy"]
+    )
+
     for epoch in range(epochs):
-        trainLoss = 0.0
-        trainAcc = 0.0
+        trainLosses = []
+        trainAccs = []
 
         model.train()
 
-        with click.progressbar(trainLoader, label="Training") as bar:
-            for i, (images, labels) in enumerate(bar):
+        with click.progressbar(
+            length=len(trainLoader),
+            label="Train",
+            item_show_func=lambda x: (
+                f"Loss: {x[0]:5.3f}  Acc: {x[1]:5.3f}" if x is not None else None
+            ),
+        ) as bar:
+            for images, labels in trainLoader:
                 images = images.cuda()
                 labels = labels.cuda()
 
@@ -252,15 +248,20 @@ def supervised(
                 loss = lossFun(output, labels)
 
                 # Record metrics
-                trainLoss += loss.item()
-                trainAcc += (output.argmax(1) == labels).sum().item()
+                trainLosses += [loss.item()]
+                trainAccs += [(output.argmax(1) == labels).sum().item() / len(labels)]
 
                 # Update weights
                 loss.backward()
                 sgd.step()
 
-        trainLoss /= len(cifarTrain)
-        trainAcc /= len(cifarTrain)
+                bar.update(
+                    1,
+                    [
+                        np.mean(trainLosses),
+                        np.mean(trainAccs),
+                    ],
+                )
 
         # Validation loop
         model.eval()
@@ -268,7 +269,7 @@ def supervised(
             testLoss = 0.0
             testAcc = 0.0
 
-            with click.progressbar(testLoader, label="Testing") as bar:
+            with click.progressbar(testLoader, label="Test ") as bar:
                 for images, labels in bar:
                     images = images.cuda()
                     labels = labels.cuda()
@@ -280,14 +281,35 @@ def supervised(
                     testAcc += (output.argmax(1) == labels).sum().item()
 
             testLoss /= len(testLoader)
-            testAcc /= len(testLoader)
+            testAcc /= len(cifarTest)
 
         print(
-            f"Epoch {epoch}: Train Loss: {trainLoss}, Train Accuracy: {trainAcc}, Test Loss: {testLoss}, Test Accuracy: {testAcc}"
+            f"Epoch {epoch + 1}: Train Loss: {np.mean(trainLosses):5.3f}, Train Accuracy: {np.mean(trainAccs):5.3f}, Test Loss: {testLoss:5.3f}, Test Accuracy: {testAcc:5.3f}"
+        )
+
+        # Add data to csv
+        trainingLog = pd.concat(
+            [
+                trainingLog,
+                pd.DataFrame(
+                    {
+                        "Epoch": [epoch],
+                        "Train_Loss": [np.mean(trainLosses)],
+                        "Train_Accuracy": [np.mean(trainAccs)],
+                        "Test_Loss": [testLoss],
+                        "Test_Accuracy": [testAcc],
+                    },
+                    index=[0],
+                ),
+            ],
+            ignore_index=True,
         )
 
     # Save model
     torch.save(model.state_dict(), f"supervised.pth")
+
+    # Save csv
+    trainingLog.to_csv("supervisedTrainingLog.csv", index=False)
 
 
 @cli.command()
@@ -346,14 +368,10 @@ def unsupervised(
     cifarTrain = CIFAR10_Paired(
         root="./data", train=True, download=True, transform=augTransform
     )
-    cifarTest = CIFAR10_Paired(
-        root="./data", train=False, download=True, transform=augTransform
-    )
 
     trainLoader = DataLoader(cifarTrain, batch_size=batch_size, shuffle=True)
-    testLoader = DataLoader(cifarTest, batch_size=batch_size, shuffle=False)
 
-    lossFun = nt_xent_slow
+    lossFun = nt_xent
     sgd = optim.SGD(
         model.parameters(),
         lr=learning_rate,
@@ -361,13 +379,17 @@ def unsupervised(
         weight_decay=weight_decay,
     )
 
+    trainingLog = pd.DataFrame(columns=["Epoch", "Train_Loss"])
     for epoch in range(epochs):
-        trainLoss = 0.0
+        trainLosses = []
 
         model.train()
-
-        with click.progressbar(trainLoader, label="Training") as bar:
-            for i, (images, labels) in enumerate(bar):
+        with click.progressbar(
+            length=len(trainLoader),
+            label="Train",
+            item_show_func=lambda x: (f"Loss: {x:5.3f}" if x is not None else None),
+        ) as bar:
+            for images, _ in trainLoader:
                 # Reshape images to go through the model (every 2 images are a positive pair)
                 shape = images.shape
                 images = images.view(shape[0] * 2, shape[2], shape[3], shape[4])
@@ -381,17 +403,40 @@ def unsupervised(
 
                 # Calculate loss
                 loss = lossFun(output)
-                print(f"Step loss: {loss.item()}")
 
-                # Record metrics
-                trainLoss += loss.item()
+                # Record metric
+                trainLosses += [loss.item()]
 
                 # Update weights
                 loss.backward()
                 sgd.step()
 
+                bar.update(
+                    1,
+                    np.mean(trainLosses),
+                )
+
         trainLoss /= len(trainLoader)
         print(f"Epoch {epoch + 1}: Train Loss: {trainLoss}")
+
+        # Add data to csv
+        trainingLog = pd.concat(
+            [
+                trainingLog,
+                pd.DataFrame(
+                    {
+                        "Epoch": [epoch],
+                        "Train_Loss": [trainLoss],
+                    },
+                    index=[0],
+                ),
+            ],
+            ignore_index=True,
+        )
+
+    # Save model
+    torch.save(model.state_dict(), f"unsupervised.pth")
+    trainingLog.to_csv("unsupervisedTrainingLog.csv", index=False)
 
 
 if __name__ == "__main__":
