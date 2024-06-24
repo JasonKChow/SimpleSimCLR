@@ -183,7 +183,7 @@ def cli():
 
 
 @cli.command()
-@click.option("--epochs", default=20, help="Number of epochs")
+@click.option("--epochs", default=100, help="Number of epochs")
 @click.option("--batch_size", default=128, help="Batch size")
 @click.option("--learning_rate", default=0.01, help="Learning rate")
 @click.option("--momentum", default=0.9, help="Momentum")
@@ -316,7 +316,7 @@ def supervised(
 
 
 @cli.command()
-@click.option("--batch_size", default=128, help="Batch size")
+@click.option("--batch_size", default=256, help="Batch size")
 @click.option(
     "--scale_range",
     default=(0.1, 1.0),
@@ -339,22 +339,20 @@ def supervised(
     type=(float, float, float, float),
 )
 @click.option("--guassian_kernel_size", default=3, help="Gaussian kernel size")
-@click.option("--epochs", default=20, help="Number of epochs")
-@click.option("--temperature", default=0.5, help="Temperature for NT-Xent loss")
-@click.option("--learning_rate", default=0.01, help="Learning rate")
-@click.option("--momentum", default=0.9, help="Momentum")
-@click.option("--weight_decay", default=1e-5, help="Weight decay")
+@click.option("--epochs", default=100, help="Number of epochs")
+@click.option("--temperature", default=0.07, help="Temperature for NT-Xent loss")
+@click.option("--learning_rate", default=0.0003, help="Learning rate")
+@click.option("--weight_decay", default=1e-4, help="Weight decay")
 def unsupervised(
-    batch_size: int = 128,
+    batch_size: int = 256,
     scale_range: Tuple[float, float] = (0.1, 1.0),
     ratio_range: Tuple[float, float] = (0.75, 1.33),
     color_jitter: Tuple[float, float, float, float] = (0.8, 0.8, 0.8, 0.2),
     guassian_kernel_size: int = 3,
-    epochs: int = 20,
-    temperature: float = 0.5,
-    learning_rate: float = 0.01,
-    momentum: float = 0.9,
-    weight_decay: float = 1e-5,
+    epochs: int = 100,
+    temperature: float = 0.07,
+    learning_rate: float = 0.0003,
+    weight_decay: float = 1e-4,
 ):
     """
     Train a small CNN on CIFAR-10 dataset using the simCLR strategy.
@@ -377,20 +375,11 @@ def unsupervised(
     trainLoader = DataLoader(cifarTrain, batch_size=batch_size, shuffle=True)
 
     lossFun = lambda x: nt_xent(x, t=temperature)
-    # optimizer = optim.SGD(
-    #     model.parameters(),
-    #     lr=learning_rate,
-    #     momentum=momentum,
-    #     weight_decay=weight_decay,
-    # )
     optimizer = optim.Adam(
         model.parameters(),
         lr=learning_rate,
         weight_decay=weight_decay,
     )
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    #     optimizer, T_max=len(trainLoader), eta_min=0, last_epoch=-1
-    # )
 
     trainingLog = pd.DataFrame(columns=["Epoch", "Train_Loss"])
     for epoch in range(epochs):
@@ -423,7 +412,6 @@ def unsupervised(
                 # Update weights
                 loss.backward()
                 optimizer.step()
-                # scheduler.step()
 
                 bar.update(
                     1,
